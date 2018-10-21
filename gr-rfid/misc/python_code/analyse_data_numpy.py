@@ -12,7 +12,7 @@ print("Sample rate is ",samp_rate)
 print("Half symbol length is ",half_symbol_length)
 #Reduce computation by specifying a range to look at
 first_sample = 100000
-last_sample  = 200000
+last_sample  = 290000
 verbose = False
 plotit = False
 
@@ -30,7 +30,7 @@ def decode_RN16(numpyarray,remove,pie):
     Allows this function to do RN16 and ACK decoding.
     
     '''
-    percentage_between = 30 #Should be 50, though lower value may give better results
+    percentage_between = 20 #Should be 50, though lower value may give better results
     # Perform a weighted mean between the maximum and minimum values.
     # Due to clipping, 50% occurs quite high up, causing some false transitions.
     avg = np.average([np.amin(numpyarray),np.amax(numpyarray)],weights=[100-percentage_between,percentage_between])
@@ -59,18 +59,40 @@ def decode_RN16(numpyarray,remove,pie):
     #position of 1s
     #print(np.where(flt_xdiff>1.3*half_symbol_length)[0])
     #print(np.diff(np.where(flt_xdiff>1.3*half_symbol_length)[0])-1)
-    
-    if pie:    
-        print("ACK  is ",RN16_bits,len(RN16_bits))
-    else:    
-        print("RN16 is ",RN16_bits,len(RN16_bits))
+    if verbose:
+        if pie:    
+            print("ACK  is ",RN16_bits,len(RN16_bits))
+        else:    
+            print("RN16 is ",RN16_bits,len(RN16_bits))
 
     
     if plotit:
         print("Max and min are ",np.amin(numpyarray),np.amax(numpyarray))
         plt.axhline(y=avg, color='r', linestyle='-')
+    return RN16_bits
 
 
+    
+def crc16(data, poly=0x8408):
+    #'''Function adapted from https://www.cgran.org/wiki/Gen2'''
+    #data = np.zeros(128)
+    #crc_16 = 0xFFFF
+    #for i in xrange(len(bits)):
+    #    for j in xrange(8):
+    #        if bits[8*i+j]=='1':
+    #            
+    #    #print(i)
+    #    pass
+    pass
+    
+#PC + EPC + CRC16 + Dummy = 6 + 16 + 96 + 16 + 1 = 135
+def decode_epc(nparray):
+    bits = decode_RN16(nparray,0,0)
+    EPC = bits[22:118]
+    
+    #print('EPC IS :',''.join(map(str,EPC)),len(EPC))
+    #print(crc16(EPC))
+    print(''.join(map(str,bits)),len(bits))
 
 f = scipy.fromfile(open(getcwd()+'/'+relative_path_to_file), dtype=scipy.float32)
 print("Number of datapoints is:",f.size)
@@ -78,13 +100,16 @@ f=f[first_sample:last_sample]
 abs_f=abs(f[0::2]+1j*f[1::2])
 
 
+
 if plotit:
     import matplotlib.pyplot as plt
     plt.plot(abs_f)
-    decode_RN16(abs_f[43000:44500],7,0)
-    decode_RN16(abs_f[45000:46600],9,1)
+    decode_RN16(abs_f[43000:44500],6,0)
+    decode_RN16(abs_f[45000:46600],8,1)
     plt.show()
 else:
-    decode_RN16(abs_f[43000:44500],7,0)
-    decode_RN16(abs_f[45000:46600],9,1)
+    print("RN16 is ",decode_RN16(abs_f[43000:44500],7,0))
+    print("ACK  is ",decode_RN16(abs_f[45000:46600],9,1))
+    decode_epc(abs_f[61800:68800])
+    decode_epc(abs_f[76800:83800])
 

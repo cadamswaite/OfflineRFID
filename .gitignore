@@ -1,5 +1,7 @@
 gr-rfid/build/
-gr-rfid/misc/
+gr-rfid/build2/
+gr-rfid/cmake/
+gr-rfid/misc/data
 GPATH
 GRTAGS
 GTAGS

@@ -1,4 +1,5 @@
 import scipy
+from scipy.signal import argrelextrema
 import numpy as np
 from os import getcwd
 
@@ -14,7 +15,45 @@ print("Half symbol length is ",half_symbol_length)
 first_sample = 100000
 last_sample  = 290000
 verbose = False
-plotit = True
+plotit = False
+
+def gate_signal(numpyarray):
+    '''Removes the high amplitude signals sent Transmitter->receiver.
+    The output signal can then be fed into find_RN16 to find where commands are sent.
+    '''
+    
+    return numpyarray
+    
+    
+
+def find_RN16(numpyarray):
+    '''Find the preamble of RN16 using cross-correlation'''
+    #TODO make this correct for different sample rates
+    signal = [1,0,1,0,2]
+    
+    sampled_signal = np.concatenate((50*[1],25*[-1],25*[1],50*[-1],25*[1],75*[-1],25*[1]))
+    print(sampled_signal)
+    #flipped = np.flipud(sampled_signal)
+    print()
+    #preamble = [50,25,25,50,25,25,75]
+    #sampled_signal = np.fliplr(sampled_signal)
+    correlated = np.correlate(numpyarray-np.mean(numpyarray),sampled_signal)
+    #print(correlated)
+    return correlated
+    
+def find_initial_transmissions(numpyarray):
+    
+    #TODO allow this to change with frequency
+    start_transmit = np.concatenate((1000*[1],25*[-1],25*[1],25*[-1],50*[1]))
+    correlated = np.correlate(numpyarray-0.5,start_transmit)
+    
+    a = np.where(correlated>550)
+    start_locations = np.take(a,argrelextrema(correlated[a], np.greater)[0])
+    
+    #start_locations = a[(correlated[a]>correlated[:a-1])]
+    print((start_locations))
+    return correlated
+
 
 
 def decode_RN16(numpyarray,remove,pie):
@@ -99,19 +138,18 @@ print("Number of datapoints is:",f.size)
 f=f[first_sample:last_sample]
 abs_f=abs(f[0::2]+1j*f[1::2])
 
-large_change_in_signal = np.where(np.diff(abs_f)>0.001)[0]
-long_wait_between_signals = diff_is[np.diff(large_change_in_signal)>300]
-print(long_wait_between_signals)
+import matplotlib.pyplot as plt
+#plt.plot(find_RN16(abs_f[12700:14800]))
+#plt.plot(abs_f-0.5)
+plt.plot(find_initial_transmissions(abs_f))
 
-y_coord = np.full(len(long_wait_between_signals),np.float32(1.02))
-
+plt.show()
 
 if plotit:
     import matplotlib.pyplot as plt
     plt.plot(abs_f)
     decode_RN16(abs_f[43000:44500],6,0)
     decode_RN16(abs_f[45000:46600],8,1)
-    plt.scatter(long_wait_between_signals,y_coord)
     plt.show()
 else:
     print("RN16 is ",decode_RN16(abs_f[43000:44500],7,0))

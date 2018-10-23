@@ -14,7 +14,7 @@ print("Half symbol length is ",half_symbol_length)
 first_sample = 100000
 last_sample  = 290000
 verbose = False
-plotit = False
+plotit = True
 
 
 def decode_RN16(numpyarray,remove,pie):
@@ -99,6 +99,11 @@ print("Number of datapoints is:",f.size)
 f=f[first_sample:last_sample]
 abs_f=abs(f[0::2]+1j*f[1::2])
 
+large_change_in_signal = np.where(np.diff(abs_f)>0.001)[0]
+long_wait_between_signals = diff_is[np.diff(large_change_in_signal)>300]
+print(long_wait_between_signals)
+
+y_coord = np.full(len(long_wait_between_signals),np.float32(1.02))
 
 
 if plotit:
@@ -106,6 +111,7 @@ if plotit:
     plt.plot(abs_f)
     decode_RN16(abs_f[43000:44500],6,0)
     decode_RN16(abs_f[45000:46600],8,1)
+    plt.scatter(long_wait_between_signals,y_coord)
     plt.show()
 else:
     print("RN16 is ",decode_RN16(abs_f[43000:44500],7,0))

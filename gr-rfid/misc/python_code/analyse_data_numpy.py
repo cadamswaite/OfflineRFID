@@ -12,8 +12,8 @@ half_symbol_length = int(round(12.5*10**-6*samp_rate))
 print("Sample rate is ",samp_rate)
 print("Half symbol length is ",half_symbol_length)
 #Reduce computation by specifying a range to look at
-first_sample = 100000
-last_sample  = 290000
+first_sample = 0
+last_sample  = 1400000
 verbose = False
 plotit = False
 
@@ -30,29 +30,29 @@ def find_RN16(numpyarray):
     '''Find the preamble of RN16 using cross-correlation'''
     #TODO make this correct for different sample rates
     signal = [1,0,1,0,2]
-    
+    #TODO downsample for speed
     sampled_signal = np.concatenate((50*[1],25*[-1],25*[1],50*[-1],25*[1],75*[-1],25*[1]))
-    print(sampled_signal)
     #flipped = np.flipud(sampled_signal)
-    print()
-    #preamble = [50,25,25,50,25,25,75]
-    #sampled_signal = np.fliplr(sampled_signal)
     correlated = np.correlate(numpyarray-np.mean(numpyarray),sampled_signal)
-    #print(correlated)
-    return correlated
+    a = np.where(correlated>0.2)
+    start_locations = np.take(a,argrelextrema(correlated[a], np.greater)[0])
+    #print("RN16 start locs are",start_locations)
+    return start_locations
+    
+    
     
 def find_initial_transmissions(numpyarray):
     
     #TODO allow this to change with frequency
-    start_transmit = np.concatenate((1000*[1],25*[-1],25*[1],25*[-1],50*[1]))
-    correlated = np.correlate(numpyarray-0.5,start_transmit)
-    
-    a = np.where(correlated>550)
-    start_locations = np.take(a,argrelextrema(correlated[a], np.greater)[0])
-    
-    #start_locations = a[(correlated[a]>correlated[:a-1])]
-    print((start_locations))
-    return correlated
+    ds = 5
+    downsampled = numpyarray[::ds]
+    start_transmit = np.concatenate((1000/ds*[1],25/ds*[-1],25/ds*[1],25/ds*[-1],50/ds*[1]))
+    correlated = np.correlate(downsampled-0.5,start_transmit)
+    a = np.where(correlated>530/ds)
+    start_locations = np.take(a,argrelextrema(correlated[a], np.greater)[0])*ds + 995 #Since started sampling 1000 before the real signal
+    # Finishes roughly 1800 later
+
+    return start_locations
 
 
 
@@ -133,16 +133,36 @@ def decode_epc(nparray):
     #print(crc16(EPC))
     print(''.join(map(str,bits)),len(bits))
 
+
+
 f = scipy.fromfile(open(getcwd()+'/'+relative_path_to_file), dtype=scipy.float32)
 print("Number of datapoints is:",f.size)
 f=f[first_sample:last_sample]
 abs_f=abs(f[0::2]+1j*f[1::2])
 
 import matplotlib.pyplot as plt
-#plt.plot(find_RN16(abs_f[12700:14800]))
-#plt.plot(abs_f-0.5)
-plt.plot(find_initial_transmissions(abs_f))
 
+plt.plot(abs_f)
+#plt.plot(
+transmission_starts = find_initial_transmissions(abs_f)
+y = np.ones(len(transmission_starts))*1.06
+plt.scatter(transmission_starts,y,c='r',marker='x')
+
+start_RN16=[]
+print("startrn16 is ",start_RN16)
+for x in range(len(transmission_starts)-1):
+    relative_start_loc = find_RN16(abs_f[transmission_starts[x]+1800:transmission_starts[x+1]])
+    try:
+        start_RN16.append(transmission_starts[x]+1800 + relative_start_loc[0])
+    except IndexError:
+        pass
+#print(start_RN16)
+
+print("Number of transmissions",len(transmission_starts))
+print("Sum of RN16s + EPCs",len(start_RN16))
+
+y = np.ones(len(start_RN16))*1.06
+plt.scatter(start_RN16,y,c='b',marker='x')
 plt.show()
 
 if plotit:

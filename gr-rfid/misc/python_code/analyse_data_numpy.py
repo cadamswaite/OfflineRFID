@@ -7,43 +7,66 @@ from os import getcwd
 
 relative_path_to_file = '../data/Corilateme/source'
 relative_path_to_file = '../data/file_source_test'
-decim = 1 #decimation of matched filter
-samp_rate = (2 * 10**6)/decim #Samples per second
+decim = 5 #decimation of matched filter
+samp_rate = (10 * 10**6)/decim #Samples per second
 half_symbol_length = int(round(12.5*10**-6*samp_rate))
 print("Sample rate is ",samp_rate)
 print("Half symbol length is ",half_symbol_length)
 #Reduce computation by specifying a range to look at
-first_sample = 25000
+first_sample = 70000
 last_sample  = 14000000
 verbose = False
 plotit = False
 
 def find_RN16(numpyarray):
     '''Find the preamble of RN16 using cross-correlation'''
-    #TODO make this correct for different sample rates
-    #TODO downsample for speed
-    sampled_signal = np.concatenate((50*[1],25*[-1],25*[1],50*[-1],25*[1],75*[-1],25*[1]))
+    #TODO downsample for speed, if reliable enough.
+    sampled_signal = np.concatenate((2*half_symbol_length*[1],half_symbol_length*[-1],half_symbol_length*[1],
+                                                            2*half_symbol_length*[-1],half_symbol_length*[1],
+                                                            3*half_symbol_length*[-1],half_symbol_length*[1]))
     #flipped = np.flipud(sampled_signal) #Usefull if convolving
     correlated = np.correlate(numpyarray-np.mean(numpyarray),sampled_signal)
-    start_locations = np.argmax(correlated)
+    start_location = np.argmax(correlated)
     #plt.plot(correlated)
     #plt.show()
+    #print("RN16 start loc is",start_location)
+    return start_location
     
-    # Old method, removed due to magic number that changes based on the data
-    #a = np.where(correlated>-1.0)
-    #start_locations = np.take(a,argrelextrema(correlated[a], np.greater)[0])
-    #print("RN16 start locs are",start_locations)
-    return start_locations
+def find_start_transmission(numpyarray):
+    '''Find the preamble of Transmission using cross-correlation'''
+    prev_samples = 700
+    start_transmit = np.concatenate((prev_samples*[1],half_symbol_length*[-1],half_symbol_length*[1],
+                                                      half_symbol_length*[-1],2*half_symbol_length*[1]))    
+    # Normalise, so midpoint is known.
+    norm_numpyarray = numpyarray/np.amax(numpyarray)
+    correlated = np.correlate(norm_numpyarray-0.5,start_transmit)
+    start_location = np.argmax(correlated)+ prev_samples
+    #plt.plot(correlated)
+    #plt.show()
+    #print("Transmission start loc is",start_location)
+    return start_location  
+
+def find_end_transmission(numpyarray):
+    '''Find the last bit location of transmission using cross-correlation'''
+    following_samples = 300
+    start_transmit = np.concatenate((half_symbol_length*[-1],following_samples*[1]))
+    norm_numpyarray = numpyarray/np.amax(numpyarray)
+    correlated = np.correlate(norm_numpyarray-0.5,start_transmit)
+    start_location = np.argmax(correlated)+half_symbol_length
+    #plt.plot(correlated)
+    #plt.show()
+    #print("Transmission end loc is",start_location)
+    return start_location                                     
     
-    
-    
+#TODO remove when working state machine.
 def find_initial_transmissions(numpyarray):
     
     #TODO allow this to change with frequency
     ds = 1
     downsampled = numpyarray[::ds]
-    prev_samples = 500
-    start_transmit = np.concatenate((prev_samples/ds*[1],25/ds*[-1],25/ds*[1],25/ds*[-1],50/ds*[1]))
+    prev_samples = 700
+    start_transmit = np.concatenate((prev_samples/ds*[1],half_symbol_length/ds*[-1],half_symbol_length/ds*[1],
+                                                         half_symbol_length/ds*[-1],2*half_symbol_length/ds*[1]))
     
     #Assuming transmit>>received, normalising should make midpoint 0.5, thus 0.5 is not magic.
     norm_downsampled = downsampled/np.amax(downsampled)
@@ -55,7 +78,7 @@ def find_initial_transmissions(numpyarray):
     # Need to find a way to find all of the high peaks for the given data.
     # Maybe generate the magicnumber dynamically eg correlated>max(correlated)-10
     # Since the transmissions will always be (roughly) the same amplitude after scaling, might not need to.
-    a = np.where(correlated>235/ds)
+    a = np.where(correlated>325)
 
     #print("Correlated is",correlated)
     start_locations = np.take(a,argrelextrema(correlated[a], np.greater)[0])*ds + prev_samples #Since started sampling 500 before the real signal
@@ -88,6 +111,7 @@ def decode_RN16(numpyarray,remove,pie):
     # Could filter more strictly in the future, or do something clever like combining small (erronious) pulses with their 
     # neighbours so the total adds to a plausable symbol_length.
     flt_xdiff = xdiff[xdiff>half_symbol_length/3.0]
+    print("Len before and after filtering",len(xdiff),len(flt_xdiff))
     if verbose:
         print("flt_xdiff IS ",flt_xdiff)
     flt_xdiff = flt_xdiff[remove:]
@@ -121,7 +145,9 @@ def decode_RN16(numpyarray,remove,pie):
             print("ACK  is ",RN16_bits,len(RN16_bits))
         else:    
             print("RN16 is ",RN16_bits,len(RN16_bits))
-
+    # Can have 17bits read, last one is false.
+    if len(RN16_bits)==17:
+        RN16_bits = RN16_bits[:16]
     
     if plotit:
         print("Max and min are ",np.amin(numpyarray),np.amax(numpyarray))
@@ -130,36 +156,76 @@ def decode_RN16(numpyarray,remove,pie):
 
 
 
-#File poerations
+#File operations
 f = scipy.fromfile(open(getcwd()+'/'+relative_path_to_file), dtype=scipy.float32)
 print("Number of datapoints is:",f.size)
 f=f[first_sample:last_sample]
 abs_f=abs(f[0::2]+1j*f[1::2])
 
 ## Matched filter to reduce hf noise
-abs_f = scipy.signal.correlate(abs_f, np.ones(5), mode='same') / 5
+abs_f = scipy.signal.correlate(abs_f, np.ones(decim), mode='same') / decim
 
-# Find and plot transmission starts
 import matplotlib.pyplot as plt
-plt.plot(abs_f)
-#plt.show()
-transmission_starts = find_initial_transmissions(abs_f)
-y = np.ones(len(transmission_starts))*1.06*np.amax(abs_f)
-plt.scatter(transmission_starts,y,c='r',marker='x')
+def find_valid_transmission(relative_position):
+    '''
+    Recursive function to find a valid start point. May eat memory.
+    '''
 
+    first_tran_start = find_start_transmission(abs_f[0+relative_position:10000+relative_position])+relative_position
+    #Searches for the end between 1500 and 2500 later than the start.
+    min_trans,max_trans = 1200,2500
+    first_tran_end = find_end_transmission(abs_f[first_tran_start+min_trans:first_tran_start+max_trans])+first_tran_start + min_trans
+    print("first_transm_loc",first_tran_start,first_tran_end)
+
+    min_trans_delay,max_trans_delay=3000,10000
+    second_tran_start = find_start_transmission(abs_f[first_tran_end+min_trans_delay:first_tran_end+max_trans_delay])+first_tran_end+min_trans_delay
+    print("second start loc",second_tran_start)
+
+    #Read data between, see if we are RN16 or EPC
+    reflected_data_loc = find_RN16(abs_f[first_tran_end+100:second_tran_start-100])+first_tran_end+100
+    print("Reflected data loc is ",reflected_data_loc)
+    rn16_test = decode_RN16(abs_f[reflected_data_loc-20:second_tran_start-20],7,0)
+    data_len = len(rn16_test)
+
+    if data_len<18 and data_len>14:
+        #probably a RN16
+        print("Found a RN16",rn16_test,len(rn16_test))
+        #Start position is the first transmsiion
+        return first_tran_start
+        
+    elif data_len>=100:
+        #probably an epc
+        print("Found a EPC",rn16_test,len(rn16_test))
+        return second_tran_start
+        
+    else:
+        #failed read
+        print("Failed to read an EPC or RN16 in range ",0+relative_position,10000+relative_position,"datalen was", data_len,"LOOPING")
+        return find_valid_transmission(relative_position+5000)
+plt.plot(abs_f)
+plt.show() 
+find_valid_transmission(0)
+# Find and plot transmission starts
+
+
+
+'''
+#transmission_starts = find_initial_transmissions(abs_f)
+#y = np.ones(len(transmission_starts))*1.06*np.amax(abs_f)
+#plt.scatter(transmission_starts,y,c='r',marker='x')
 
 start_RN16=[]
-failed_RN16=[]
+start_EPC = []
 offset = 1900 # How far after the start of a transmission the RN16 can be expected
 for x in range(len(transmission_starts)-1):
     relative_start_loc = find_RN16(abs_f[transmission_starts[x]+offset:transmission_starts[x+1]])
-    # This now doesn't fail, but will pick incorrect RN16 when no RN16 is present
-    start_RN16.append(transmission_starts[x]+offset + relative_start_loc)
-    #try:
-    #    start_RN16.append(transmission_starts[x]+offset + relative_start_loc)
-    #except IndexError:
-    #    failed_RN16.append(transmission_starts[x]+offset)
-        
+    # If the time between transmission starts is longer than 7000, it is an EPC not RN16
+    if transmission_starts[x]+7000>transmission_starts[x+1]:
+        # This now doesn't fail, but will pick incorrect RN16 when no RN16 is present
+        start_RN16.append(transmission_starts[x]+offset + relative_start_loc)
+    else:
+        start_EPC.append(transmission_starts[x]+offset + relative_start_loc)
+    
     #Decode the ACK signals
     ACK = decode_RN16(abs_f[transmission_starts[x]-100:(transmission_starts[x]+offset)],9,1)
     #print("ACK IS ",ACK)
@@ -171,15 +237,15 @@ print("Sum of RN16s + EPCs",len(start_RN16))
 
 y_start_RN16 = np.ones(len(start_RN16))*1.06*np.amax(abs_f)
 plt.scatter(start_RN16,y_start_RN16,c='b',marker='x')
-y_failed_RN16 = np.ones(len(failed_RN16))*1.02*np.amax(abs_f)
-plt.scatter(failed_RN16,y_failed_RN16,c='r',marker='o')
+#y_failed_RN16 = np.ones(len(failed_RN16))*1.02*np.amax(abs_f)
+#plt.scatter(failed_RN16,y_failed_RN16,c='r',marker='o')
 
 # Decode RN16s, add text to the plot
 for start in start_RN16:
     #print("Start point is ",start)
     #print("data to decode is ", abs_f[start:(start+200)])
     RN16 = decode_RN16(abs_f[start-10:(start+1500)],7,0)
-    #print("RN16 value is ",RN16,len(RN16))
+    print("RN16 value is ",RN16,len(RN16))
     plt.text(start+200,1.09*np.amax(abs_f),int(''.join(map(str,RN16)),2))
     
 plt.show()
@@ -193,4 +259,5 @@ if plotit:
 else:
     print("RN16 is ",decode_RN16(abs_f[43000:44500],7,0))
     print("ACK  is ",decode_RN16(abs_f[45000:46600],9,1))
+'''
 
